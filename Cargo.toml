@@ -4,4 +4,4 @@ version = "0.1.0"
 authors = ["Filip Hornak <filip.hornak@comsource.cz>"]
 
 [dependencies]
-pnet="0.14.0"
+pnet="0.17.1"

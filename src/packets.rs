@@ -1,6 +1,8 @@
 extern crate pnet;
 
 use std::net::IpAddr;
+use std::str::FromStr;
+
 use pnet::packet::Packet;
 use pnet::packet::arp::ArpPacket;
 use pnet::packet::ethernet::{EtherTypes, EthernetPacket};
@@ -36,15 +38,15 @@ trait Handler {
     fn can_handle_arp(&self) -> bool;
 }
 
-struct PacketHandler<'a> {
+struct PacketHandler {
     handlers: Vec<Box<Handler>>,
-    if_name: &'a str
+    if_name: String
 }
 
-impl<'a> PacketHandler<'a> {
-    fn new(if_name: &'a str, handlers: Vec<Box<Handler>>) -> PacketHandler<'a>
+impl PacketHandler {
+    fn new(if_name: &str, handlers: Vec<Box<Handler>>) -> PacketHandler
     {
-        PacketHandler { handlers: handlers, if_name: if_name }
+        PacketHandler { handlers: handlers, if_name: String::from_str(if_name).unwrap()}
     }
 
     fn handle_tcp_packet(&self,
@@ -55,7 +57,7 @@ impl<'a> PacketHandler<'a> {
     {
         if let Some(tpc_packet) = TcpPacket::new(packet) {
             self.handlers.iter().filter(|&handler| { handler.can_handle_tcp() })
-                .map(|&handler| { handler.can_handle_tcp() });
+                .map(|ref mut handler| { handler.can_handle_tcp() });
             Ok(())
         } else {
             Err("Malformed tcp packet")
@@ -70,7 +72,7 @@ impl<'a> PacketHandler<'a> {
     {
         if let Some(udp_packet) = UdpPacket::new(packet) {
             self.handlers.iter().filter(|&handler| { handler.can_handle_udp() })
-                .map(|&handler| { handler.on_udp_packet(&source, &destination, &udp_packet) });
+                .map(|ref mut handler| { handler.on_udp_packet(&source, &destination, &udp_packet) });
             Ok(())
         } else {
             Err("Malformed udp packet")
@@ -80,7 +82,7 @@ impl<'a> PacketHandler<'a> {
     fn handle_icmp_packet(&self, source: IpAddr, destination: IpAddr, packet: &[u8]) -> Result<(), &'static str> {
         if let Some(icmp) = IcmpPacket::new(packet) {
             self.handlers.iter().filter(|&handler| { handler.can_handle_icmp() })
-                .map(|&handler| { handler.on_icmp_packet(&source, &destination, &icmp) });
+                .map(|ref mut handler| { handler.on_icmp_packet(&source, &destination, &icmp) });
             Ok(())
         } else {
             Err("Malformed icmp packet")
@@ -90,7 +92,7 @@ impl<'a> PacketHandler<'a> {
     fn handle_arp_packet(&self, packet: &ArpPacket) -> Result<(), &'static str> {
         if let Some(arp_packet) = ArpPacket::new(packet.payload()) {
             self.handlers.iter().filter(|&handler| { handler.can_handle_arp() })
-                .map(|&handler| { handler.on_arp_packet(&arp_packet) });
+                .map(|ref mut handler| { handler.on_arp_packet(&arp_packet) });
             Ok(())
         } else {
             Err("Malformed arp packet")
@@ -109,15 +111,15 @@ impl<'a> PacketHandler<'a> {
         -> Result<(), &'static str>
     {
         match protocol {
-            IpNextHeaderProtocol::Udp => {
+            IpNextHeaderProtocols::Udp => {
                 self.handle_udp_packet(source, destination, packet);
                 Ok(())
             }
-            IpNextHeaderProtocol::Tcp => {
+            IpNextHeaderProtocols::Tcp => {
                 self.handle_tcp_packet(source, destination, packet);
                 Ok(())
             }
-            IpNextHeaderProtocol::Icmp => {
+            IpNextHeaderProtocols::Icmp => {
                 self.handle_icmp_packet(source, destination, packet);
                 Ok(())
             }
@@ -166,33 +168,36 @@ impl<'a> PacketHandler<'a> {
                 } else {
                     Err("Malformed Arp packer")
                 }
+            },
+            _ => {
+                Err("Unknown packet!")
             }
         }
     }
 
-    fn add_handler(&mut self, handler: Handler)
+    fn add_handler(&mut self, handler: &Handler)
     {
-        self.handlers.append(Box::new(handler));
+        self.handlers.push(Box::new(handler))
     }
 
     fn can_handle_tcp(&self) -> bool {
-        self.handlers.iter().any(|&handler| { handler.can_handle_tcp() })
+        self.handlers.iter().any(|ref handler| { handler.can_handle_tcp() })
     }
 
     fn can_handle_unknown(&self) -> bool {
-        self.handlers.iter().any(|&handler| { handler.can_handle_unknown() })
+        self.handlers.iter().any(|ref handler| { handler.can_handle_unknown() })
     }
 
     fn can_handle_udp(&self) -> bool {
-        self.handlers.iter().and(|&handler| { handler.can_handle_udp() })
+        self.handlers.iter().any(|ref handler| { handler.can_handle_udp() })
     }
 
     fn can_handle_icmp(&self) -> bool {
-        self.handlers.iter().any(|&handler| { handler.can_handle_icmp() })
+        self.handlers.iter().any(|ref handler| { handler.can_handle_icmp() })
     }
 
     fn can_handle_arp(&self) -> bool {
-        self.handlers.iter().any(|&handler| { handler.can_handle_arp() })
+        self.handlers.iter().any(|ref handler| { handler.can_handle_arp() })
     }
 }
 
