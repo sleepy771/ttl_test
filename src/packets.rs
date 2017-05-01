@@ -2,6 +2,7 @@ extern crate pnet;
 
 use std::net::IpAddr;
 use std::str::FromStr;
+use std::borrow::BorrowMut;
 
 use pnet::packet::Packet;
 use pnet::packet::arp::ArpPacket;
@@ -13,17 +14,26 @@ use pnet::packet::ipv6::Ipv6Packet;
 use pnet::packet::tcp::TcpPacket;
 use pnet::packet::udp::UdpPacket;
 
+struct Entry<'a> {
+    timestamp: u64,
+    raw: &'a [u8],
+    from: Option<IpAddr>,
+    to: Option<IpAddr>,
+}
 
 trait Handler {
     fn name(&self) -> &str;
 
-    fn on_tcp_packet(&mut self, source: &IpAddr, destination: &IpAddr, packet: &TcpPacket) -> Result<(), &'static str>;
+    fn on_tcp_packet(&self, source: &IpAddr, destination: &IpAddr, packet: &TcpPacket)
+        -> Result<(), &'static str>;
 
-    fn on_udp_packet(&mut self, source: &IpAddr, destination: &IpAddr, packet: &UdpPacket) -> Result<(), &'static str>;
+    fn on_udp_packet(&self, source: &IpAddr, destination: &IpAddr, packet: &UdpPacket)
+        -> Result<(), &'static str>;
 
-    fn on_icmp_packet(&mut self, source: &IpAddr, destination: &IpAddr, packet: &IcmpPacket) -> Result<(), &'static str>;
+    fn on_icmp_packet(&self, source: &IpAddr, destination: &IpAddr, packet: &IcmpPacket)
+        -> Result<(), &'static str>;
 
-    fn on_arp_packet(&mut self, packet: &ArpPacket) -> Result<(), &'static str>;
+    fn on_arp_packet(&self, packet: &ArpPacket) -> Result<(), &'static str>;
 
     fn on_unknown(&mut self, packet: &EthernetPacket) -> Result<(), &'static str>;
 
@@ -71,8 +81,6 @@ impl PacketHandler {
         -> Result<(), &'static str>
     {
         if let Some(udp_packet) = UdpPacket::new(packet) {
-            self.handlers.iter().filter(|&handler| { handler.can_handle_udp() })
-                .map(|ref mut handler| { handler.on_udp_packet(&source, &destination, &udp_packet) });
             Ok(())
         } else {
             Err("Malformed udp packet")
@@ -81,8 +89,11 @@ impl PacketHandler {
 
     fn handle_icmp_packet(&self, source: IpAddr, destination: IpAddr, packet: &[u8]) -> Result<(), &'static str> {
         if let Some(icmp) = IcmpPacket::new(packet) {
-            self.handlers.iter().filter(|&handler| { handler.can_handle_icmp() })
-                .map(|ref mut handler| { handler.on_icmp_packet(&source, &destination, &icmp) });
+            for ref handler in &self.handlers {
+                if handler.can_handle_icmp() {
+                    handler.on_icmp_packet(&source, &destination, &icmp);
+                }
+            }
             Ok(())
         } else {
             Err("Malformed icmp packet")
@@ -91,8 +102,6 @@ impl PacketHandler {
 
     fn handle_arp_packet(&self, packet: &ArpPacket) -> Result<(), &'static str> {
         if let Some(arp_packet) = ArpPacket::new(packet.payload()) {
-            self.handlers.iter().filter(|&handler| { handler.can_handle_arp() })
-                .map(|ref mut handler| { handler.on_arp_packet(&arp_packet) });
             Ok(())
         } else {
             Err("Malformed arp packet")
@@ -175,9 +184,9 @@ impl PacketHandler {
         }
     }
 
-    fn add_handler(&mut self, handler: &Handler)
+    fn add_handler<Key: Handler + 'static>(&mut self, handler: Box<Key>)
     {
-        self.handlers.push(Box::new(handler))
+        self.handlers.push(handler)
     }
 
     fn can_handle_tcp(&self) -> bool {
