@@ -117,7 +117,7 @@ fn parse_flags(flags: u16) -> String {
         (TcpFlags::URG, "URG")
     ];
     let flag_names: Vec<String> = flags_to_check.into_iter().filter(|&(flag, symbol)|{ has_flag(flags, flag) }).map(|(flag, symbol)| { symbol.to_string() }).collect();
-    flag_names.join("")
+    flag_names.join(",")
 }
 
 fn has_flag(flags: u16, flag: u16) -> bool {
