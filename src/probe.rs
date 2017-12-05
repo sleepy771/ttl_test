@@ -1,6 +1,7 @@
 
 use std::net::IpAddr;
 use std::sync::mpsc::Sender;
+use std::collections::HashMap;
 
 use pnet::datalink::{self};
 use pnet::packet::Packet;
@@ -10,9 +11,34 @@ use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::ipv6::Ipv6Packet;
 use pnet::packet::tcp::{TcpPacket, TcpFlags};
 use pnet::packet::udp::UdpPacket;
+use pnet::packet::icmp::{IcmpTypes, IcmpPacket, IcmpType};
 use pnet::datalink::Channel::Ethernet;
 
 use collector::SimpleIpfix;
+
+lazy_static! {
+    static ref ICMP_CONVERT: HashMap<IcmpType, &'static str> = {
+        let mut map = HashMap::new();
+        map.insert(IcmpTypes::EchoReply, "EchoReply");
+        map.insert(IcmpTypes::DestinationUnreachable, "DestinationUnreachable");
+        map.insert(IcmpTypes::SourceQuench, "SourceQuench");
+        map.insert(IcmpTypes::RedirectMessage, "RedirectMessage");
+        map.insert(IcmpTypes::EchoRequest, "EchoRequest");
+        map.insert(IcmpTypes::RouterAdvertisement, "RouterAdvertisement");
+        map.insert(IcmpTypes::RouterSolicitation, "RouterSolicitation");
+        map.insert(IcmpTypes::TimeExceeded, "TimeExceeded");
+        map.insert(IcmpTypes::ParameterProblem, "ParameterProblem");
+        map.insert(IcmpTypes::Timestamp, "Timestamp");
+        map.insert(IcmpTypes::TimestampReply, "TimestampReply");
+        map.insert(IcmpTypes::InformationRequest, "InformationRequest");
+        map.insert(IcmpTypes::InformationReply, "InformationReply");
+        map.insert(IcmpTypes::AddressMaskRequest, "AddressMaskRequest");
+        map.insert(IcmpTypes::AddressMaskReply, "AddressMaskReply");
+        map.insert(IcmpTypes::Traceroute, "Traceroute");
+        map
+    };
+}
+
 
 struct Probe {
     sender: Sender<SimpleIpfix>,
@@ -41,7 +67,14 @@ impl Probe {
 
     fn handle_udp_packet(&self, source: IpAddr, destination: IpAddr, packet: &[u8]) -> Option<SimpleIpfix> {
         if let Some(udp) = UdpPacket::new(packet) {
-            Some((source, udp.get_source(), destination, udp.get_destination(), "UDP", vec![]))
+            Some(
+                (
+                    create_address(source, udp.get_source()),
+                    create_address(destination, udp.get_destination()),
+                    "UDP",
+                    vec![]
+                )
+                )
         } else {
             None
         }
@@ -50,7 +83,34 @@ impl Probe {
     fn handle_tcp_packet(&self, source: IpAddr, destination: IpAddr, packet: &[u8]) -> Option<SimpleIpfix> {
         if let Some(tcp) = TcpPacket::new(packet) {
             let flags = parse_flags(tcp.get_flags());
-            Some((source, tcp.get_source(), destination, tcp.get_destination(), "TCP", vec![("flags", flags)]))
+            Some(
+                (
+                    create_address(source, tcp.get_source()),
+                    create_address(destination, tcp.get_destination()),
+                    "TCP",
+                    vec![("flags", flags)]
+                )
+                )
+        } else {
+            None
+        }
+    }
+
+    fn handle_icmp_packer(&self, source: IpAddr, destination: IpAddr, packet: &[u8]) -> Option<SimpleIpfix> {
+        if let Some(icmp) = IcmpPacket::new(packet) {
+            let icmp_type = icmp.get_icmp_type();
+            let type_name: String = match ICMP_CONVERT.get(&icmp_type) {
+                Some(name) => name.to_string(),
+                None => format!("{}", icmp.get_icmp_type().0)
+            };
+            Some(
+                (
+                    format!("{}", source),
+                    format!("{}", destination),
+                    "ICMP",
+                    vec![("type", type_name), ("code", format!("{}", icmp.get_icmp_code().0))]
+                )
+                )
         } else {
             None
         }
@@ -69,10 +129,10 @@ impl Probe {
                 self.handle_tcp_packet(source, destination, packet)
             }
             IpNextHeaderProtocols::Icmp => {
-                Some((source, 0, destination, 0, "ICMP", vec![]))
+                self.handle_icmp_packer(source, destination, packet)
             }
             IpNextHeaderProtocols::Icmpv6 => {
-                Some((source, 0, destination, 0, "ICMPv6", vec![]))
+                Some((format!("{}", source), format!("{}", destination), "ICMPv6", vec![]))
             }
             _ => {
                 None
@@ -106,7 +166,6 @@ impl Probe {
     }
 }
 
-
 fn parse_flags(flags: u16) -> String {
     let flags_to_check: Vec<(u16, &'static str)> = vec![
         (TcpFlags::SYN, "SYN"),
@@ -122,6 +181,11 @@ fn parse_flags(flags: u16) -> String {
 
 fn has_flag(flags: u16, flag: u16) -> bool {
     (flags & flag) == flag
+}
+
+
+fn create_address(address: IpAddr, port: u16) -> String {
+    format!("{}:{}", address, port)
 }
 
 
