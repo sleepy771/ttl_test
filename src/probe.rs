@@ -106,7 +106,7 @@ impl Probe {
 }
 
 
-pub fn run_probe(sender: Sender<SimpleIpfix>, iface_name: &str) {
+pub fn run_probe(sender: Sender<SimpleIpfix>, iface_name: &str, sampling: u32) {
 
     // Find the network interface with the provided name
     let interfaces = datalink::interfaces();
@@ -121,15 +121,36 @@ pub fn run_probe(sender: Sender<SimpleIpfix>, iface_name: &str) {
 
     let probe = Probe::new(sender);
 
-    loop {
-        match rx.next() {
-            Ok(packet) => probe.handle_packet(&EthernetPacket::new(packet).unwrap()),
-            Err(e) => {
-                error!("packetprobe: unable to receive packer: {}", e);
-                break;
-            }
+    if sampling >= 2u32 {
+        let mut sample_counter = 0u32;
+        loop {
+            match rx.next() {
+                Ok(packet) => {
+                    if sample_counter == 0u32 {
+                        probe.handle_packet(&EthernetPacket::new(packet).unwrap())
+                    }
+                    sample_counter = (sample_counter + 1) % sampling;
+                },
+                Err(e) => {
+                    error!("packetprobe: unable to receive packer: {}", e);
+                    break;
+                }
+            };
         };
-    };
+    } else {
+        loop {
+            match rx.next() {
+                Ok(packet) => {
+                    probe.handle_packet(&EthernetPacket::new(packet).unwrap())
+                },
+                Err(e) => {
+                    error!("packetprobe: unable to receive packer: {}", e);
+                    break;
+                }
+            };
+        };
+
+    }   
     drop(rx);
 }
 

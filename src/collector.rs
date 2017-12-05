@@ -16,17 +16,23 @@ pub type SimpleIpfix = (IpAddr, u16, IpAddr, u16, &'static str);
 pub struct MutWindow {
     samples: HashMap<SimpleIpfix, u32>,
     time_from: u64,
+    sampling: u32,
 }
 
 impl MutWindow {
-    pub fn new() -> MutWindow {
-        MutWindow {samples: HashMap::new(), time_from: time::precise_time_ns()}
+    pub fn new(sampling: u32) -> MutWindow {
+        let smpl = if sampling < 2u32 {
+            1u32
+        } else {
+            sampling
+        };
+        MutWindow {samples: HashMap::new(), time_from: time::precise_time_ns(), sampling: smpl}
     }
 
     pub fn add(&mut self, signature: SimpleIpfix) -> () {
         let new_count = match self.samples.get(&signature) {
-            Some(count) => count + 1,
-            None => 1
+            Some(count) => count + self.sampling,
+            None => self.sampling
         };
         self.samples.insert(signature, new_count);
     }
@@ -98,12 +104,14 @@ impl IntoIterator for Window {
 
 pub struct WindowCollector {
     window: Option<MutWindow>,
+    sampling: u32,
 }
 
 impl WindowCollector {
-    pub fn new() -> WindowCollector {
+    pub fn new(sampling: u32) -> WindowCollector {
         WindowCollector {
             window: None,
+            sampling: sampling,
         }
     }
 
@@ -117,7 +125,7 @@ impl WindowCollector {
                 println!("{:?}: {}", ipfix, cnt);
             }
         };
-        self.window = Some(MutWindow::new());
+        self.window = Some(MutWindow::new(self.sampling));
     }
 
     pub fn add(&mut self, signature: SimpleIpfix) -> Result<(), &'static str> {
@@ -138,8 +146,8 @@ impl WindowCollector {
     }
 }
 
-pub fn run_collector(receiver: Receiver<SimpleIpfix>) {
-    let collector = Arc::new(Mutex::new(WindowCollector::new()));
+pub fn run_collector(receiver: Receiver<SimpleIpfix>, sampling: u32) {
+    let collector = Arc::new(Mutex::new(WindowCollector::new(sampling)));
     {
         let mut col = collector.lock().unwrap();
         (*col).next_window();
