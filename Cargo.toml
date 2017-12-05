@@ -1,10 +1,13 @@
 [package]
 name = "ttl-checker"
 version = "0.1.0"
-authors = ["Filip Hornak <filip.hornak@comsource.cz>"]
+authors = ["Filip Hornak <sleepy771@gmail.com>"]
 
 [dependencies]
 pnet="0.20.0"
 time="0.1"
 timer="0.2.0"
 chrono="0.4.0"
+log="0.3.8"
+env_logger="0.4.3"
+argparse="0.2.1"

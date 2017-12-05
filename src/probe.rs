@@ -1,18 +1,10 @@
 
-extern crate pnet;
-
-use std::env;
-use std::io::{self, Write};
-use std::process;
 use std::net::IpAddr;
 use std::sync::mpsc::Sender;
 
-use pnet::datalink::{self, NetworkInterface};
+use pnet::datalink::{self};
 use pnet::packet::Packet;
-use pnet::packet::arp::ArpPacket;
 use pnet::packet::ethernet::{EtherTypes, EthernetPacket};
-use pnet::packet::icmpv6::Icmpv6Packet;
-use pnet::packet::icmp::{echo_reply, echo_request, IcmpPacket, IcmpTypes};
 use pnet::packet::ip::{IpNextHeaderProtocol, IpNextHeaderProtocols};
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::ipv6::Ipv6Packet;
@@ -24,13 +16,11 @@ use collector::SimpleIpfix;
 
 struct Probe {
     sender: Sender<SimpleIpfix>,
-    ifname: String
 }
 
 impl Probe {
-    pub fn new(ifname: String, sender: Sender<SimpleIpfix>) -> Probe {
+    pub fn new(sender: Sender<SimpleIpfix>) -> Probe {
         Probe {
-            ifname: ifname,
             sender: sender
         }
     }
@@ -51,7 +41,7 @@ impl Probe {
 
     fn handle_udp_packet(&self, source: IpAddr, destination: IpAddr, packet: &[u8]) -> Option<SimpleIpfix> {
         if let Some(udp) = UdpPacket::new(packet) {
-            Some((source, udp.get_source(), destination, udp.get_destination(), IpNextHeaderProtocols::Udp))
+            Some((source, udp.get_source(), destination, udp.get_destination(), "UDP"))
         } else {
             None
         }
@@ -59,7 +49,7 @@ impl Probe {
 
     fn handle_tcp_packet(&self, source: IpAddr, destination: IpAddr, packet: &[u8]) -> Option<SimpleIpfix> {
         if let Some(tcp) = TcpPacket::new(packet) {
-            Some((source, tcp.get_source(), destination, tcp.get_destination(), IpNextHeaderProtocols::Tcp))
+            Some((source, tcp.get_source(), destination, tcp.get_destination(), "TCP"))
         } else {
             None
         }
@@ -78,10 +68,10 @@ impl Probe {
                 self.handle_tcp_packet(source, destination, packet)
             }
             IpNextHeaderProtocols::Icmp => {
-                Some((source, 0, destination, 0, IpNextHeaderProtocols::Icmp))
+                Some((source, 0, destination, 0, "ICMP"))
             }
             IpNextHeaderProtocols::Icmpv6 => {
-                Some((source, 0, destination, 0, IpNextHeaderProtocols::Icmpv6))
+                Some((source, 0, destination, 0, "ICMPv6"))
             }
             _ => {
                 None
@@ -129,14 +119,17 @@ pub fn run_probe(sender: Sender<SimpleIpfix>, iface_name: &str) {
         Err(e) => panic!("packetdump: unable to create channel: {}", e),
     };
 
-    let ifname = interface.name[..].to_string();
-    let probe = Probe::new(ifname, sender);
+    let probe = Probe::new(sender);
 
     loop {
         match rx.next() {
             Ok(packet) => probe.handle_packet(&EthernetPacket::new(packet).unwrap()),
-            Err(e) => panic!("packetdump: unable to receive packet: {}", e),
-        }
-    }
+            Err(e) => {
+                error!("packetprobe: unable to receive packer: {}", e);
+                break;
+            }
+        };
+    };
+    drop(rx);
 }
 

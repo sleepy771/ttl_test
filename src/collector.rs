@@ -1,22 +1,16 @@
-extern crate pnet;
 extern crate time;
-extern crate timer;
-extern crate chrono;
 
-use pnet::packet::ip::IpNextHeaderProtocol;
 use std::net::IpAddr;
 use std::collections::HashMap;
-use std::iter::{IntoIterator, Iterator};
+use std::iter::IntoIterator;
 use std::cmp;
-use std::sync::mpsc::{Sender, Receiver};
+use std::sync::mpsc::{Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 
-pub type SimpleIpfix = (IpAddr, u16, IpAddr, u16, IpNextHeaderProtocol);
-pub type IpfixCounter = (SimpleIpfix, u32);
-pub type TimedIpfixCounter = (SimpleIpfix, u32, u64, u64);
+pub type SimpleIpfix = (IpAddr, u16, IpAddr, u16, &'static str);
 
 #[derive(Debug,Clone)]
 pub struct MutWindow {
@@ -29,10 +23,6 @@ impl MutWindow {
         MutWindow {samples: HashMap::new(), time_from: time::precise_time_ns()}
     }
 
-    pub fn contains(&self, signature: &SimpleIpfix) -> bool {
-        self.samples.contains_key(signature)
-    }
-
     pub fn add(&mut self, signature: SimpleIpfix) -> () {
         let new_count = match self.samples.get(&signature) {
             Some(count) => count + 1,
@@ -41,7 +31,7 @@ impl MutWindow {
         self.samples.insert(signature, new_count);
     }
 
-    pub fn end_collecting(mut self) -> Window {
+    pub fn end_collecting(self) -> Window {
         let time_to = time::precise_time_ns();
         Window {samples: self.samples, time_from: self.time_from, time_to: time_to}
     }
@@ -108,18 +98,12 @@ impl IntoIterator for Window {
 
 pub struct WindowCollector {
     window: Option<MutWindow>,
-//    sender: Sender<Window>,
-    window_capacity: usize,
-    is_running: bool
 }
 
 impl WindowCollector {
     pub fn new() -> WindowCollector {
         WindowCollector {
-//            sender: sender,
             window: None,
-            window_capacity: 20,
-            is_running: false
         }
     }
 
@@ -154,8 +138,8 @@ impl WindowCollector {
     }
 }
 
-pub fn run_collector(receiver: Receiver<SimpleIpfix>) -> Arc<Mutex<WindowCollector>> {
-    let mut collector = Arc::new(Mutex::new(WindowCollector::new()));
+pub fn run_collector(receiver: Receiver<SimpleIpfix>) {
+    let collector = Arc::new(Mutex::new(WindowCollector::new()));
     {
         let mut col = collector.lock().unwrap();
         (*col).next_window();
@@ -171,16 +155,19 @@ pub fn run_collector(receiver: Receiver<SimpleIpfix>) -> Arc<Mutex<WindowCollect
                     let mut collector_guard = (*collector_loop).lock().unwrap();
                     (*collector_guard).add(ipfix).unwrap();
                 },
-                Err(_) => panic!("Somethign happend")
+                Err(e) => {
+                    error!("Collector receiver error occured: {}", e);
+                    drop(receiver);
+                    break;
+                }
             };
         }
     });
-    println!("Starting timer");
-    let timer = timer::Timer::new();
-    let guard = timer.schedule_repeating(chrono::Duration::seconds(5), move || {
-        println!("Call next window");
-        let mut collector_guard = (*collector_time).lock().unwrap();
-        (*collector_guard).next_window();
+    thread::spawn(move || {
+        loop {
+            thread::sleep(Duration::new(5, 0));
+            let mut col = (*collector_time).lock().unwrap();
+            (*col).next_window();
+        }
     });
-    collector
 }
