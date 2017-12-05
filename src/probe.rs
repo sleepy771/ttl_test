@@ -8,7 +8,7 @@ use pnet::packet::ethernet::{EtherTypes, EthernetPacket};
 use pnet::packet::ip::{IpNextHeaderProtocol, IpNextHeaderProtocols};
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::ipv6::Ipv6Packet;
-use pnet::packet::tcp::TcpPacket;
+use pnet::packet::tcp::{TcpPacket, TcpFlags};
 use pnet::packet::udp::UdpPacket;
 use pnet::datalink::Channel::Ethernet;
 
@@ -41,7 +41,7 @@ impl Probe {
 
     fn handle_udp_packet(&self, source: IpAddr, destination: IpAddr, packet: &[u8]) -> Option<SimpleIpfix> {
         if let Some(udp) = UdpPacket::new(packet) {
-            Some((source, udp.get_source(), destination, udp.get_destination(), "UDP"))
+            Some((source, udp.get_source(), destination, udp.get_destination(), "UDP", vec![]))
         } else {
             None
         }
@@ -49,7 +49,8 @@ impl Probe {
 
     fn handle_tcp_packet(&self, source: IpAddr, destination: IpAddr, packet: &[u8]) -> Option<SimpleIpfix> {
         if let Some(tcp) = TcpPacket::new(packet) {
-            Some((source, tcp.get_source(), destination, tcp.get_destination(), "TCP"))
+            let flags = parse_flags(tcp.get_flags());
+            Some((source, tcp.get_source(), destination, tcp.get_destination(), "TCP", vec![("flags", flags)]))
         } else {
             None
         }
@@ -68,10 +69,10 @@ impl Probe {
                 self.handle_tcp_packet(source, destination, packet)
             }
             IpNextHeaderProtocols::Icmp => {
-                Some((source, 0, destination, 0, "ICMP"))
+                Some((source, 0, destination, 0, "ICMP", vec![]))
             }
             IpNextHeaderProtocols::Icmpv6 => {
-                Some((source, 0, destination, 0, "ICMPv6"))
+                Some((source, 0, destination, 0, "ICMPv6", vec![]))
             }
             _ => {
                 None
@@ -103,6 +104,24 @@ impl Probe {
             None
         }
     }
+}
+
+
+fn parse_flags(flags: u16) -> String {
+    let flags_to_check: Vec<(u16, &'static str)> = vec![
+        (TcpFlags::SYN, "SYN"),
+        (TcpFlags::FIN, "FIN"),
+        (TcpFlags::ACK, "ACK"),
+        (TcpFlags::RST, "RST"),
+        (TcpFlags::PSH, "PSH"),
+        (TcpFlags::URG, "URG")
+    ];
+    let flag_names: Vec<String> = flags_to_check.into_iter().filter(|&(flag, symbol)|{ has_flag(flags, flag) }).map(|(flag, symbol)| { symbol.to_string() }).collect();
+    flag_names.join("")
+}
+
+fn has_flag(flags: u16, flag: u16) -> bool {
+    (flags & flag) == flag
 }
 
 

@@ -10,7 +10,7 @@ use std::thread;
 use std::time::Duration;
 
 
-pub type SimpleIpfix = (IpAddr, u16, IpAddr, u16, &'static str);
+pub type SimpleIpfix = (IpAddr, u16, IpAddr, u16, &'static str, Vec<(&'static str, String)>);
 
 #[derive(Debug,Clone)]
 pub struct MutWindow {
