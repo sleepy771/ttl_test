@@ -96,7 +96,7 @@ impl Probe {
         }
     }
 
-    fn handle_icmp_packer(&self, source: IpAddr, destination: IpAddr, packet: &[u8]) -> Option<SimpleIpfix> {
+    fn handle_icmp_packet(&self, source: IpAddr, destination: IpAddr, packet: &[u8]) -> Option<SimpleIpfix> {
         if let Some(icmp) = IcmpPacket::new(packet) {
             let icmp_type = icmp.get_icmp_type();
             let type_name: String = match ICMP_CONVERT.get(&icmp_type) {
@@ -129,7 +129,7 @@ impl Probe {
                 self.handle_tcp_packet(source, destination, packet)
             }
             IpNextHeaderProtocols::Icmp => {
-                self.handle_icmp_packer(source, destination, packet)
+                self.handle_icmp_packet(source, destination, packet)
             }
             IpNextHeaderProtocols::Icmpv6 => {
                 Some((format!("{}", source), format!("{}", destination), "ICMPv6", vec![]))

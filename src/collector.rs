@@ -1,3 +1,4 @@
+use std::mem::swap;
 use std::net::IpAddr;
 use std::collections::HashMap;
 use std::collections::hash_map::Iter;
@@ -122,10 +123,11 @@ impl WindowCollector {
 
     pub fn next_window(&mut self) -> () {
         println!("Call next window");
-        if let Some(ref window) = self.window {
-            self.sender.send(window.clone().end_collecting()).unwrap();
+        let mut loco_window = Some(MutWindow::new(self.sampling));
+        swap(&mut self.window, &mut loco_window);
+        if let Some(window) = loco_window {
+            self.sender.send(window.end_collecting()).unwrap();
         };
-        self.window = Some(MutWindow::new(self.sampling));
     }
 
     pub fn add(&mut self, signature: SimpleIpfix) -> Result<(), &'static str> {
