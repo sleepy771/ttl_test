@@ -1,13 +1,13 @@
-extern crate time;
-
 use std::net::IpAddr;
 use std::collections::HashMap;
-use std::iter::IntoIterator;
+use std::collections::hash_map::Iter;
+use std::iter::{IntoIterator, Iterator};
 use std::cmp;
-use std::sync::mpsc::{Receiver};
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use time;
 
 
 pub type SimpleIpfix = (String, String, &'static str, Vec<(&'static str, String)>);
@@ -26,7 +26,7 @@ impl MutWindow {
         } else {
             sampling
         };
-        MutWindow {samples: HashMap::new(), time_from: time::precise_time_ns(), sampling: smpl}
+        MutWindow {samples: HashMap::new(), time_from: time_now(), sampling: smpl}
     }
 
     pub fn add(&mut self, signature: SimpleIpfix) -> () {
@@ -38,7 +38,7 @@ impl MutWindow {
     }
 
     pub fn end_collecting(self) -> Window {
-        let time_to = time::precise_time_ns();
+        let time_to = time_now();
         Window {samples: self.samples, time_from: self.time_from, time_to: time_to}
     }
 
@@ -90,6 +90,10 @@ impl Window {
             Err("Windows does not overlap, there is no reason to make union")
         }
     }
+    
+    pub fn iter(&self) -> Iter<SimpleIpfix, u32> {
+        self.samples.iter()
+    }
 }
 
 impl IntoIterator for Window {
@@ -101,29 +105,25 @@ impl IntoIterator for Window {
     }
 }
 
-
 pub struct WindowCollector {
     window: Option<MutWindow>,
     sampling: u32,
+    sender: Sender<Window>,
 }
 
 impl WindowCollector {
-    pub fn new(sampling: u32) -> WindowCollector {
+    pub fn new(sampling: u32, sender: Sender<Window>) -> WindowCollector {
         WindowCollector {
             window: None,
             sampling: sampling,
+            sender: sender
         }
     }
 
     pub fn next_window(&mut self) -> () {
         println!("Call next window");
         if let Some(ref window) = self.window {
-//            self.sender.send(window.clone().end_collecting()).unwrap();
-            let wnd = window.clone().end_collecting();
-            println!("New window t=[{}, {}]", wnd.time_from, wnd.time_to);
-            for (ipfix, cnt) in wnd.into_iter() {
-                println!("{:?}: {}", ipfix, cnt);
-            }
+            self.sender.send(window.clone().end_collecting()).unwrap();
         };
         self.window = Some(MutWindow::new(self.sampling));
     }
@@ -146,8 +146,8 @@ impl WindowCollector {
     }
 }
 
-pub fn run_collector(receiver: Receiver<SimpleIpfix>, sampling: u32) {
-    let collector = Arc::new(Mutex::new(WindowCollector::new(sampling)));
+pub fn run_collector(receiver: Receiver<SimpleIpfix>, sender: Sender<Window>, sampling: u32) {
+    let collector = Arc::new(Mutex::new(WindowCollector::new(sampling, sender)));
     {
         let mut col = collector.lock().unwrap();
         (*col).next_window();
@@ -173,9 +173,14 @@ pub fn run_collector(receiver: Receiver<SimpleIpfix>, sampling: u32) {
     });
     thread::spawn(move || {
         loop {
-            thread::sleep(Duration::new(5, 0));
+            thread::sleep(Duration::new(30, 0));
             let mut col = (*collector_time).lock().unwrap();
             (*col).next_window();
         }
     });
+}
+
+pub fn time_now() -> u64 {
+    let timespec = time::get_time();
+    ((timespec.sec * 1000) as u64) + ((timespec.nsec / 1000000) as u64) 
 }

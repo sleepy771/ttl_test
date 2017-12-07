@@ -6,9 +6,12 @@ authors = ["Filip Hornak <sleepy771@gmail.com>"]
 [dependencies]
 pnet="0.20.0"
 time="0.1"
-timer="0.2.0"
 chrono="0.4.0"
 log="0.3.8"
 env_logger="0.4.3"
 argparse="0.2.1"
 lazy_static="1.0.0"
+influx_db_client = "0.3.0"
+
+[patch.crates-io]
+influx_db_client = { git = 'https://github.com/driftluo/InfluxDBClient-rs' }

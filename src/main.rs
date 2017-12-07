@@ -5,17 +5,22 @@ extern crate log;
 extern crate lazy_static;
 extern crate env_logger;
 extern crate argparse;
+extern crate time;
+#[macro_use]
+extern crate influx_db_client;
 
 mod collector;
 mod probe;
+mod store;
 
 use std::sync::mpsc::{channel};
 use std::thread;
 
 use argparse::{ArgumentParser, Collect, StoreTrue, Store};
 
-use collector::{run_collector, SimpleIpfix};
+use collector::{run_collector, SimpleIpfix, Window};
 use probe::run_probe;
+use store::run_storer;
 
 struct Config {
     verbose: bool,
@@ -43,6 +48,7 @@ fn main() {
     info!("Starting packet capag");
     let run_cfg = parse_settings();
     let (tx, rx) = channel::<SimpleIpfix>();
+    let (window_tx, window_rx) = channel::<Window>();
     let mut guard_vec = vec![];
     let sampling = run_cfg.sampling;
     for iface in run_cfg.interfaces {
@@ -53,12 +59,12 @@ fn main() {
         });
         guard_vec.push(guard);
     }
-    run_collector(rx, sampling);
+    run_collector(rx, window_tx, sampling);
+    run_storer(window_rx);
     for guard in guard_vec {
         guard.join().unwrap();
     }
     drop(tx);
-//    collector.run_reciever(rx);
     info!("Closing packet packag");
 }
 
