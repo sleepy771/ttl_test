@@ -3,9 +3,10 @@ use std::thread;
 use influx_db_client::{Client, Point, Points, Value, Precision};
 
 use collector::{SimpleIpfix, Window};
+use ::CONFIG;
 
 lazy_static! {
-    static ref INFLUX: Client = Client::new("http://localhost:8086", "mydb");
+    static ref INFLUX: Client = Client::new(CONFIG.influx_host.as_str(), CONFIG.influx_db.as_str());
 }
 
 

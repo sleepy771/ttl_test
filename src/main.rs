@@ -26,32 +26,53 @@ struct Config {
     verbose: bool,
     interfaces: Vec<String>,
     sampling: u32,
+    influx_host: String,
+    influx_db: String,
+    cfg_file: String,
 }
 
 
-fn parse_settings() -> Config {
-    let mut cfg = Config {verbose: false, interfaces: vec!["lo".to_string()], sampling: 1u32};
-    {
-        let mut ap = ArgumentParser::new();
-        ap.set_description("Packet capturer and aggregator");
-        ap.refer(&mut cfg.verbose).add_option(&["-v", "--verbose"], StoreTrue, "Enable verbose mode");
-        ap.refer(&mut cfg.interfaces).add_argument("INTERFACES", Collect, "Capturing interfaces");
-        ap.refer(&mut cfg.sampling).add_option(&["-s", "--sampling"], Store, "How much packets are not captured");
-        ap.parse_args_or_exit();
-    }
-    cfg
+lazy_static! {
+    static ref CONFIG: Config = {
+    
+        let mut cfg = Config {
+            verbose: false,
+            interfaces: vec!["lo".to_string()],
+            sampling: 1u32,
+            influx_host: "http://localhost:8086".to_string(),
+            influx_db: "mydb".to_string(),
+            cfg_file: "/etc/ttl_test/config.json".to_string(),
+        };
+        {
+            let mut ap = ArgumentParser::new();
+            ap.set_description("Packet capturer and aggregator");
+            ap.refer(&mut cfg.verbose)
+                .add_option(&["-v", "--verbose"], StoreTrue, "Enable verbose mode");
+            ap.refer(&mut cfg.interfaces)
+                .add_argument("INTERFACES", Collect, "Capturing interfaces");
+            ap.refer(&mut cfg.sampling)
+                .add_option(&["-s", "--sampling"], Store, "How much packets are not captured");
+            ap.refer(&mut cfg.influx_host)
+                .add_option(&["-i", "--influx-host"], Store, "Influx host address");
+            ap.refer(&mut cfg.influx_db)
+                .add_option(&["-d", "--database"], Store, "Influx database name");
+            ap.refer(&mut cfg.cfg_file)
+                .add_option(&["-c", "--config"], Store, "Config file path");
+            ap.parse_args_or_exit();
+        }
+        cfg
+    };
 }
 
 
 fn main() {
     env_logger::init().unwrap();
     info!("Starting packet capag");
-    let run_cfg = parse_settings();
     let (tx, rx) = channel::<SimpleIpfix>();
     let (window_tx, window_rx) = channel::<Window>();
     let mut guard_vec = vec![];
-    let sampling = run_cfg.sampling;
-    for iface in run_cfg.interfaces {
+    let sampling = CONFIG.sampling;
+    for iface in &CONFIG.interfaces {
         let iface_sender = tx.clone();
 
         let guard = thread::spawn(move || {
