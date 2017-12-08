@@ -1,9 +1,8 @@
 use std::mem::swap;
-use std::net::IpAddr;
 use std::collections::HashMap;
-use std::collections::hash_map::Iter;
-use std::iter::{IntoIterator, Iterator};
-use std::cmp;
+// use std::collections::hash_map::Iter;
+use std::iter::IntoIterator;
+// use std::cmp;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -16,7 +15,6 @@ pub type SimpleIpfix = (String, String, &'static str, Vec<(&'static str, String)
 #[derive(Debug,Clone)]
 pub struct MutWindow {
     samples: HashMap<SimpleIpfix, u32>,
-    time_from: u64,
     sampling: u32,
 }
 
@@ -27,7 +25,10 @@ impl MutWindow {
         } else {
             sampling
         };
-        MutWindow {samples: HashMap::new(), time_from: time_now(), sampling: smpl}
+        MutWindow {
+            samples: HashMap::new(),
+            sampling: smpl
+        }
     }
 
     pub fn add(&mut self, signature: SimpleIpfix) -> () {
@@ -40,61 +41,60 @@ impl MutWindow {
 
     pub fn end_collecting(self) -> Window {
         let time_to = time_now();
-        Window {samples: self.samples, time_from: self.time_from, time_to: time_to}
+        Window {
+            samples: self.samples,
+            time_to: time_to
+        }
     }
 
-    pub fn len(&self) -> usize {
-        self.samples.len()
-    }
+//    pub fn len(&self) -> usize {
+//        self.samples.len()
+//    }
 }
 
 #[derive(Debug,Clone)]
 pub struct Window {
     samples: HashMap<SimpleIpfix, u32>,
-    time_from: u64,
     time_to: u64
 }
 
 impl Window {
-    pub fn start_time(&self) -> u64 {
-        self.time_from
-    }
 
     pub fn end_time(&self) -> u64 {
         self.time_to
     }
 
-    pub fn overlaps(&self, window: &Window) -> bool {
-        let max_start_time = cmp::max(window.time_from, self.time_from);
-        let min_end_time = cmp::min(window.time_to, self.time_to);
-        max_start_time >= min_end_time
-    }
+//    pub fn overlaps(&self, window: &Window) -> bool {
+//        let max_start_time = cmp::max(window.time_from, self.time_from);
+//        let min_end_time = cmp::min(window.time_to, self.time_to);
+//        max_start_time >= min_end_time
+//    }
     
-    pub fn union(&self, window: &Window) -> Result<Window, &'static str> {
-        if self.overlaps(window) {
-            let min_start_time = cmp::min(self.time_from, window.time_from);
-            let max_end_time = cmp::max(self.time_to, window.time_to);
-            let mut new_flows: HashMap<SimpleIpfix, u32> = HashMap::new();
-            for ipfix in self.samples.keys() {
-                let self_ipfix_count = match self.samples.get(&ipfix) {
-                    Some(count) => count.clone(),
-                    None => 0u32
-                };
-                let window_ipfix_count = match window.samples.get(&ipfix) {
-                    Some(count) => count.clone(),
-                    None => 0u32
-                };
-                new_flows.insert(ipfix.clone(), self_ipfix_count + window_ipfix_count);
-            }
-            Ok(Window {samples: new_flows, time_from: min_start_time, time_to: max_end_time})
-        } else {
-            Err("Windows does not overlap, there is no reason to make union")
-        }
-    }
-    
-    pub fn iter(&self) -> Iter<SimpleIpfix, u32> {
-        self.samples.iter()
-    }
+//    pub fn union(&self, window: &Window) -> Result<Window, &'static str> {
+//        if self.overlaps(window) {
+//            let min_start_time = cmp::min(self.time_from, window.time_from);
+//            let max_end_time = cmp::max(self.time_to, window.time_to);
+//            let mut new_flows: HashMap<SimpleIpfix, u32> = HashMap::new();
+//            for ipfix in self.samples.keys() {
+//                let self_ipfix_count = match self.samples.get(&ipfix) {
+//                    Some(count) => count.clone(),
+//                    None => 0u32
+//                };
+//                let window_ipfix_count = match window.samples.get(&ipfix) {
+//                    Some(count) => count.clone(),
+//                    None => 0u32
+//                };
+//                new_flows.insert(ipfix.clone(), self_ipfix_count + window_ipfix_count);
+//            }
+//            Ok(Window {samples: new_flows, time_from: min_start_time, time_to: max_end_time})
+//        } else {
+//            Err("Windows does not overlap, there is no reason to make union")
+//        }
+//    }
+//    
+//    pub fn iter(&self) -> Iter<SimpleIpfix, u32> {
+//        self.samples.iter()
+//    }
 }
 
 impl IntoIterator for Window {
@@ -140,12 +140,12 @@ impl WindowCollector {
         }
     }
 
-    pub fn window_size(&self) -> usize {
-        match self.window {
-            Some(ref wnd) => wnd.len(),
-            None => 0
-        }
-    }
+//    pub fn window_size(&self) -> usize {
+//        match self.window {
+//            Some(ref wnd) => wnd.len(),
+//            None => 0
+//        }
+//    }
 }
 
 pub fn run_collector(receiver: Receiver<SimpleIpfix>, sender: Sender<Window>, sampling: u32) {

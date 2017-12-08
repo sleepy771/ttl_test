@@ -8,13 +8,13 @@ extern crate argparse;
 extern crate time;
 #[macro_use]
 extern crate influx_db_client;
+extern crate spmc;
 
 mod collector;
 mod probe;
 mod store;
 
 use std::sync::mpsc::{channel};
-use std::thread;
 
 use argparse::{ArgumentParser, Collect, StoreTrue, Store};
 
@@ -29,6 +29,7 @@ struct Config {
     influx_host: String,
     influx_db: String,
     cfg_file: String,
+    processors: u8,
 }
 
 
@@ -42,6 +43,7 @@ lazy_static! {
             influx_host: "http://localhost:8086".to_string(),
             influx_db: "mydb".to_string(),
             cfg_file: "/etc/ttl_test/config.json".to_string(),
+            processors: 2,
         };
         {
             let mut ap = ArgumentParser::new();
@@ -58,6 +60,8 @@ lazy_static! {
                 .add_option(&["-d", "--database"], Store, "Influx database name");
             ap.refer(&mut cfg.cfg_file)
                 .add_option(&["-c", "--config"], Store, "Config file path");
+            ap.refer(&mut cfg.processors)
+                .add_option(&["-w", "--workers"], Store, "Specifies how many processors should run");
             ap.parse_args_or_exit();
         }
         cfg
@@ -70,22 +74,16 @@ fn main() {
     info!("Starting packet capag");
     let (tx, rx) = channel::<SimpleIpfix>();
     let (window_tx, window_rx) = channel::<Window>();
-    let mut guard_vec = vec![];
     let sampling = CONFIG.sampling;
-    for iface in &CONFIG.interfaces {
-        let iface_sender = tx.clone();
-
-        let guard = thread::spawn(move || {
-            run_probe(iface_sender, iface.as_str(), sampling);
-        });
-        guard_vec.push(guard);
-    }
+    let interfaces: Vec<String> = CONFIG.interfaces.clone().into_iter()
+        .map(|iface| {iface.to_string()})
+        .collect::<Vec<String>>();
+    let guard_vec = run_probe(tx, interfaces, sampling, CONFIG.processors);
     run_collector(rx, window_tx, sampling);
     run_storer(window_rx);
     for guard in guard_vec {
         guard.join().unwrap();
     }
-    drop(tx);
     info!("Closing packet packag");
 }
 

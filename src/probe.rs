@@ -1,7 +1,7 @@
-
 use std::net::IpAddr;
 use std::sync::mpsc::Sender;
 use std::collections::HashMap;
+use std::thread;
 
 use pnet::datalink::{self};
 use pnet::packet::Packet;
@@ -13,6 +13,9 @@ use pnet::packet::tcp::{TcpPacket, TcpFlags};
 use pnet::packet::udp::UdpPacket;
 use pnet::packet::icmp::{IcmpTypes, IcmpPacket, IcmpType};
 use pnet::datalink::Channel::Ethernet;
+
+
+use spmc;
 
 use collector::SimpleIpfix;
 
@@ -61,7 +64,10 @@ impl Probe {
         };
 
         if let Some(ipfix) = ipfix {
-            self.sender.send(ipfix).unwrap();
+            match self.sender.send(ipfix) {
+                Err(e) => error!("Failed to send ipfix, due to: {}", e),
+                _ => {}
+            }
         }
     }
 
@@ -167,15 +173,19 @@ impl Probe {
 }
 
 fn parse_flags(flags: u16) -> String {
-    let flags_to_check: Vec<(u16, &'static str)> = vec![
-        (TcpFlags::SYN, "SYN"),
-        (TcpFlags::FIN, "FIN"),
-        (TcpFlags::ACK, "ACK"),
-        (TcpFlags::RST, "RST"),
-        (TcpFlags::PSH, "PSH"),
-        (TcpFlags::URG, "URG")
-    ];
-    let flag_names: Vec<String> = flags_to_check.into_iter().filter(|&(flag, symbol)|{ has_flag(flags, flag) }).map(|(flag, symbol)| { symbol.to_string() }).collect();
+    lazy_static! {
+        static ref FLAGS: Vec<(u16, &'static str)> = vec![
+            (TcpFlags::SYN, "SYN"),
+            (TcpFlags::FIN, "FIN"),
+            (TcpFlags::ACK, "ACK"),
+            (TcpFlags::RST, "RST"),
+            (TcpFlags::PSH, "PSH"),
+            (TcpFlags::URG, "URG")
+        ];
+    }
+    let flag_names: Vec<String> = FLAGS.iter()
+        .filter(|ref pair|{ has_flag(flags, pair.0) })
+        .map(|ref pair| { pair.1.to_string() }).collect();
     flag_names.join(",")
 }
 
@@ -189,20 +199,59 @@ fn create_address(address: IpAddr, port: u16) -> String {
 }
 
 
-pub fn run_probe(sender: Sender<SimpleIpfix>, iface_name: &str, sampling: u32) {
+pub fn run_probe(sender: Sender<SimpleIpfix>,
+                 iface_names: Vec<String>,
+                 sampling: u32,
+                 processors: u8) -> Vec<thread::JoinHandle<()>> {
+    let mut guards = vec![];
+    for iface_name in iface_names {
+        let (tx, rx) = spmc::channel::<Vec<u8>>();
+        let snd = sender.clone();
+        run_pcap_processor(snd, rx, processors);
+        guards.push(thread::spawn(move || {
+            run_sniffer(iface_name.as_str(), sampling, tx);
+        }));
+    }
+    guards
+}
 
-    // Find the network interface with the provided name
+
+pub fn run_pcap_processor(sender: Sender<SimpleIpfix>,
+                          receiver: spmc::Receiver<Vec<u8>>,
+                          processors: u8) {
+    for _ in 0 .. processors {
+        let proc_snd = sender.clone();
+        let proc_rcv = receiver.clone();
+
+        thread::spawn(move || {
+            let probe = Probe::new(proc_snd);
+            loop {
+                match proc_rcv.recv() {
+                    Ok(pkt) => probe.handle_packet(&EthernetPacket::new(&pkt).unwrap()),
+                    Err(e) => { 
+                        error!("packetprocessor: queue error occured: {}", e);
+                        break;
+                    }
+                }
+            }
+        });
+    }
+}
+
+
+pub fn run_sniffer(iface_name: &str,
+                   sampling: u32,
+                   sender: spmc::Sender<Vec<u8>>) {
     let interfaces = datalink::interfaces();
-    let interface = interfaces.into_iter().filter(|iface| iface.name == iface_name).next().unwrap();
+    let interface = interfaces.into_iter()
+        .filter(|iface| iface.name == iface_name)
+        .next().unwrap();
 
-    // Create a channel to receive on
     let (_, mut rx) = match datalink::channel(&interface, Default::default()) {
         Ok(Ethernet(tx, rx)) => (tx, rx),
         Ok(_) => panic!("packetdump: unhandled channel type: {}"),
         Err(e) => panic!("packetdump: unable to create channel: {}", e),
     };
-
-    let probe = Probe::new(sender);
 
     if sampling >= 2u32 {
         let mut sample_counter = 0u32;
@@ -210,30 +259,42 @@ pub fn run_probe(sender: Sender<SimpleIpfix>, iface_name: &str, sampling: u32) {
             match rx.next() {
                 Ok(packet) => {
                     if sample_counter == 0u32 {
-                        probe.handle_packet(&EthernetPacket::new(packet).unwrap())
+                        let pkt_vec: Vec<u8> = Vec::from(packet);
+                        match sender.send(pkt_vec) {
+                            Err(e) => {
+                                error!("Error occured during send: {}", e);
+                                break;
+                            },
+                            _ => {}
+                        }
                     }
                     sample_counter = (sample_counter + 1) % sampling;
-                },
+                }
                 Err(e) => {
-                    error!("packetprobe: unable to receive packer: {}", e);
+                    error!("packetsniffer: unable to receive packet: {}", e);
                     break;
                 }
-            };
-        };
+            }
+        }
     } else {
         loop {
             match rx.next() {
                 Ok(packet) => {
-                    probe.handle_packet(&EthernetPacket::new(packet).unwrap())
+                    match sender.send(Vec::from(packet)) {
+                        Err(e) => {
+                            error!("Error occured during send: {}", e);
+                            break;
+                        },
+                        _ => {}
+                    }
                 },
                 Err(e) => {
-                    error!("packetprobe: unable to receive packer: {}", e);
+                    error!("packetsniffer: unable to receive packet: {}", e);
                     break;
                 }
-            };
-        };
-
-    }   
+            }
+        }
+    }
     drop(rx);
 }
 
